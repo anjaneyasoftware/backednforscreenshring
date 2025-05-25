@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>🎛 Admin Dashboard</h1>
+    <button id="logoutBtn" class="logout-btn">🚪 Logout</button>
+  </header>
+
+  <main>
+    <section class="form-card">
+      <h2>Create New User</h2>
+      <form id="createUserForm">
+        <input type="email" id="userEmail" placeholder="User Email" required />
+        <input type="password" id="userPassword" placeholder="Password" required />
+        <select id="userRole" required>
+          <option value="" disabled selected>Select Role</option>
+          <option value="operator">Operator</option>
+          <option value="viewer">Viewer</option>
+        </select>
+        <button type="submit">➕ Create User</button>
+      </form>
+    </section>
+
+    <section class="list-card">
+      <h2>All Users</h2>
+      <ul id="userList"></ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>© 2025 Admin Panel. Built with ❤️</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

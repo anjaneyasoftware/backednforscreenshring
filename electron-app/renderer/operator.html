@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Operator Dashboard</title>
+  <script src="https://cdn.agora.io/sdk/release/AgoraRTC_N.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: #f4f6f8;
+      color: #333;
+      display: flex;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+
+    .operator-interface {
+      width: 100%;
+      max-width: 800px;
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin: 0;
+      color: #2c3e50;
+    }
+
+    select, button {
+      padding: 10px 15px;
+      font-size: 16px;
+      border-radius: 6px;
+    }
+
+    select {
+      border: 1px solid #ccc;
+      background-color: #fafafa;
+    }
+
+    button {
+      background-color: #28a745;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #218838;
+    }
+
+    #screenContainer {
+      width: 100%;
+      height: 400px;
+      border: 2px dashed #ccc;
+      border-radius: 10px;
+      background-color: #f8f9fa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      color: #999;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="operator-interface">
+  <header>
+    <h1>🖥️ Operator Dashboard</h1>
+    <select id="viewerSelect">
+      <option value="" disabled selected>Select Viewer</option>
+    </select>
+    <button id="startSharingBtn">Start Screen Sharing</button>
+
+    <button id="stopSharingBtn" style="background-color:#dc3545; display:none;">Stop Sharing</button>
+
+    <button id="logoutBtn" style="background-color:#6c757d;">Logout</button>
+
+
+  </header>
+
+  <div id="screenContainer">Screen sharing not started</div>
+</div>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<script>
+
+const backendBaseUrl = 'https://your-backend.onrender.com';
+const socketServerUrl = 'https://your-socket-backend.onrender.com';
+
+  let screenTrack = null;
+  let isSharing = false;
+
+  const AGORA_APP_ID = 'a70176aa7bb5427d986289ec90f9e8d4';
+  const viewerSelect = document.getElementById("viewerSelect");
+  const screenContainer = document.getElementById("screenContainer");
+  const stopSharingBtn = document.getElementById("stopSharingBtn");
+  const startSharingBtn = document.getElementById("startSharingBtn");
+
+  // ✅ Get Operator ID from localStorage after login
+  const operatorToken = localStorage.getItem('token');
+  const operatorRole = localStorage.getItem('role');
+  const operatorId = localStorage.getItem('userId');
+const socket = io(socketServerUrl);
+socket.emit("register", operatorId);  // Send your userId
+
+  if (!operatorToken || operatorRole !== 'operator') {
+    alert('Unauthorized. Please log in as an operator.');
+    window.location.href = 'login.html';
+  }
+
+  const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+  // ✅ Load viewers from backend
+  async function loadViewers() {
+    try {
+      const res = await fetch(`${backendBaseUrl}/api/admin/users`, {
+        headers: {
+          'Authorization': `Bearer ${operatorToken}`
+        }
+      });
+
+      const users = await res.json();
+      users
+        .filter(u => u.role === 'viewer')
+        .forEach(viewer => {
+          const option = document.createElement('option');
+          option.value = viewer.uniqueId;
+          option.textContent = `${viewer.email} (${viewer.uniqueId})`;
+          viewerSelect.appendChild(option);
+        });
+    } catch (err) {
+      console.error('Failed to load viewers:', err);
+    }
+  }
+
+  loadViewers();
+
+  // ✅ Start screen sharing with selected viewer
+  // Inside the renderer process (operator.html)
+document.getElementById("startSharingBtn").addEventListener("click", async () => {
+  const selectedViewerId = viewerSelect.value;
+  if (!selectedViewerId) {
+    alert("Please select a viewer.");
+    return;
+  }
+
+  const channel = selectedViewerId;
+
+  try {
+    // Send an IPC message to the main process to get screen sources
+    const sources = await window.electron.getSources({ types: ['screen', 'window'] });
+
+    if (sources && sources.length > 0) {
+      const sourceId = sources[0].id;  // Take the first available source
+
+      // Get user media with the selected screen/window
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId,
+          },
+        },
+      });
+
+      const track = AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: stream.getVideoTracks()[0] });
+
+      const backendPort = 5000;
+      const res = await fetch(`${backendBaseUrl}/generate-token?userId=${operatorId}&channel=${channel}`);
+      const { token } = await res.json();
+
+      await client.join(AGORA_APP_ID, channel, token, operatorId);
+      await client.publish([track]);
+
+      screenContainer.innerText = `📡 Sharing screen with ${selectedViewerId} on channel: ${channel}`;
+      isSharing = true;
+      startSharingBtn.style.display = 'none';
+      stopSharingBtn.style.display = 'inline-block';
+      viewerSelect.disabled = true;
+
+          socket.emit("start-sharing", { viewerId: selectedViewerId });
+
+    } else {
+      throw new Error('No screen sources found');
+    }
+  } catch (error) {
+    console.error("Screen share error:", error);
+    screenContainer.innerText = "❌ Screen sharing failed.";
+  }
+});
+// socket.emit("start-share", { viewerId: selectedViewerId });
+
+   stopSharingBtn.addEventListener("click", async () => {
+    if (screenTrack) {
+      screenTrack.stop();
+      screenTrack.close();
+      screenTrack = null;
+    }
+
+    await client.leave();
+
+    isSharing = false;
+    screenContainer.innerText = "🛑 Screen sharing stopped.";
+    startSharingBtn.style.display = 'inline-block';
+    stopSharingBtn.style.display = 'none';
+    viewerSelect.disabled = false;
+    viewerSelect.value = "";
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", () => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("role");
+  localStorage.removeItem("userId");
+  window.location.href = "login.html";
+});
+
+</script>
+
+</body>
+</html>
